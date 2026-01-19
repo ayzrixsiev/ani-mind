@@ -19,12 +19,12 @@ jobs:
         run: |
           echo "DATABASE_URL=postgresql+asyncpg://ayzz:yourpassword@db:5432/fastapi" >> .env
           echo "POSTGRES_USER=ayzz" >> .env
-          echo "POSTGRES_PASSWORD=yourpassword" >> .env
+          echo "POSTGRES_PASSWORD=password123" >> .env
           echo "POSTGRES_DB=fastapi" >> .env
 
       # Step B: Start your Docker containers (just like you do locally)
       - name: Start Docker Compose
-        run: docker compose up --build -d
+        run: docker compose up db
 
       # Step C: Wait for the database to be ready (it takes a few seconds to boot)
       - name: Wait for DB
