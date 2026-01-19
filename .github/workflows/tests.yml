@@ -1,0 +1,46 @@
+name: Run Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create temporary .env file
+        run: |
+          echo "DATABASE_URL=postgresql+asyncpg://ayzz:yourpassword@db:5432/fastapi" >> .env
+          echo "POSTGRES_USER=ayzz" >> .env
+          echo "POSTGRES_PASSWORD=password123" >> .env
+          echo "POSTGRES_DB=fastapi" >> .env
+          echo "SECRET_KEY=09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7" >> .env
+          echo "ALGORITHM=HS256" >> .env
+          echo "ACCESS_TOKEN_EXPIRE_MINUTES=30" >> .env
+
+      - name: Start Database
+        run: docker compose up -d db
+
+      - name: Wait for Database
+        run: |
+          until docker compose exec -T db pg_isready -U ayzz -d fastapi; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+
+      - name: Setup and Start API
+        run: |
+          docker compose exec -T db psql -U ayzz -d fastapi -c "CREATE DATABASE fastapi_test;"
+          docker compose up --build -d api
+
+      - name: Wait for API
+        run: sleep 5
+
+      - name: Run Pytest
+        run: docker compose exec -T api pytest -v
+
+      - name: Check Container Logs on Failure
+        if: failure()
+        run: docker compose logs

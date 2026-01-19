@@ -1,0 +1,20 @@
+meta {
+  name: AnimeList
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://127.0.0.1:8000/anime/list
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo4LCJyb2xlIjoidXNlciIsImV4cCI6MTc2ODQ4MTc4OX0.9Avg48fWcFbrqKYKUG0PSruPbV7LRjLYL7SciqdYo9k
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

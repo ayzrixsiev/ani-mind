@@ -1,0 +1,20 @@
+meta {
+  name: Get User
+  type: http
+  seq: 8
+}
+
+get {
+  url: http://127.0.0.1:8000/profile/9
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo5LCJyb2xlIjoidXNlciIsImV4cCI6MTc2ODQ5ODI4MX0.0rtfi0PJqAthx5j8F8bl7IryzsRcnKQp7LCgv8tX1LM
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
