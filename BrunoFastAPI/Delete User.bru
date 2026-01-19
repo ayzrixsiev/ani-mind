@@ -1,0 +1,26 @@
+meta {
+  name: Delete User
+  type: http
+  seq: 9
+}
+
+delete {
+  url: http://127.0.0.1:8000/profile/7
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{my_token}}
+}
+
+script:post-response {
+  if (res.status === 200) {
+    bru.setEnvVar("my_token", res.body.access_token);
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

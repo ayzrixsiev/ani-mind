@@ -1,0 +1,29 @@
+meta {
+  name: Add Anime
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://127.0.0.1:8000/anime/list
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo4LCJyb2xlIjoidXNlciIsImV4cCI6MTc2ODQ4MTc4OX0.9Avg48fWcFbrqKYKUG0PSruPbV7LRjLYL7SciqdYo9k
+}
+
+body:json {
+  {
+    "title": "Solo leveling 2",
+    "rating": 10,
+    "status": "Watched",
+    "genres": ["Action", "Fantasy", "Adventure"]
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

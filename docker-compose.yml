@@ -1,0 +1,28 @@
+# all the containers that we will have
+services:
+  db: # name of the first container: database
+    image: postgres:15
+    volumes: # the folder inside container /var/lib/postgresql/data connect to the saved on local machine folder postgres_data. 
+      - postgres_data:/var/lib/postgresql/data
+    environment: # set up credentials and db name
+      - POSTGRES_USER=ayzz
+      - POSTGRES_PASSWORD=password123
+      - POSTGRES_DB=fastapi
+    ports:
+      - "5432:5432" # (Map) Computer Port 5432 -> Docker Port 5432.
+  api: # name of the second container: api code
+    build: . # "Look at my Dockerfile to build this box."
+    ports:
+      - "8000:8000"      # Browser Port 8000 -> Docker Port 8000.
+    volumes: # Use my current . project folder and save it in the container inside /code, so if there is a change in my code it will see it 
+      - .:/code
+    env_file: # read secure data and inject them into container's memory
+      - .env
+    environment: # override db url because in .evn it has localhost but in docker it is db
+      - DATABASE_URL=postgresql+psycopg://ayzz:password123@db:5432/fastapi
+    depends_on: # run the api only after DB is activated
+      - db
+
+volumes: # creating a special folder to save the DB data on my local machine
+  postgres_data:
+    
