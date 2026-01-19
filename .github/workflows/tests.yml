@@ -1,53 +1,46 @@
 name: Run Tests
 
-# 1. When should pipeline be activated
 on: [push, pull_request]
 
 jobs:
   test:
-    # 2. WHERE should it work? (A fresh Ubuntu machine)
     runs-on: ubuntu-latest
 
     steps:
-      # Step A: Copy your code from GitHub onto the robot's computer
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Step B: Create a temporary .env file for the containers
       - name: Create temporary .env file
         run: |
           echo "DATABASE_URL=postgresql+asyncpg://ayzz:yourpassword@db:5432/fastapi" >> .env
           echo "POSTGRES_USER=ayzz" >> .env
           echo "POSTGRES_PASSWORD=password123" >> .env
           echo "POSTGRES_DB=fastapi" >> .env
+          echo "SECRET_KEY=09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7" >> .env
+          echo "ALGORITHM=HS256" >> .env
+          echo "ACCESS_TOKEN_EXPIRE_MINUTES=30" >> .env
 
-      # Step C: Start ONLY the Database first
       - name: Start Database
         run: docker compose up -d db
 
-      # Step D: Wait for the Database to be "Ready for connections"
       - name: Wait for Database
         run: |
-          until docker compose exec -T db pg_isready -U ayzz; do
+          until docker compose exec -T db pg_isready -U ayzz -d fastapi; do
             echo "Waiting for postgres..."
             sleep 2
           done
 
-      # Step E: Create the test DB and start the API with a fresh build
       - name: Setup and Start API
         run: |
           docker compose exec -T db psql -U ayzz -d fastapi -c "CREATE DATABASE fastapi_test;"
           docker compose up --build -d api
 
-      # Step F: Give the API a few seconds to initialize its connection
       - name: Wait for API
         run: sleep 5
 
-      # Step G: Run the tests!
       - name: Run Pytest
         run: docker compose exec -T api pytest -v
 
-      # Step H: If anything fails, show us the logs so we can debug
       - name: Check Container Logs on Failure
         if: failure()
         run: docker compose logs
