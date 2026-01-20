@@ -25,7 +25,7 @@ class Anime(Base):
     )
 
 
-class Users(Base):
+class User(Base):
     __tablename__ = "users_table"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

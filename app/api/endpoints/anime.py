@@ -22,7 +22,7 @@ db_dep = Annotated[AsyncSession, Depends(get_db)]
     status_code=status.HTTP_200_OK,
 )
 async def get_anime_list(
-    current_user: Annotated[models.Users, Depends(get_current_user)], db: db_dep
+    current_user: Annotated[models.User, Depends(get_current_user)], db: db_dep
 ):
     try:
         query = select(models.Anime).where(models.Anime.owner_id == current_user.id)
@@ -49,7 +49,7 @@ async def get_anime_list(
 async def add_anime(
     anime: schemas.AnimeCreate,
     db: db_dep,
-    current_user: Annotated[models.Users, Depends(get_current_user)],
+    current_user: Annotated[models.User, Depends(get_current_user)],
 ):
     try:
         new_anime_entry = models.Anime(**anime.model_dump(), owner_id=current_user.id)
@@ -74,7 +74,7 @@ async def update_anime_details(
     anime_id: int,
     user_targeted_anime: schemas.AnimeUpdate,
     db: db_dep,
-    current_user: Annotated[models.Users, Depends(get_current_user)],
+    current_user: Annotated[models.User, Depends(get_current_user)],
 ):
     # Find anime and store it in db_anime
     query = select(models.Anime).where(
@@ -111,7 +111,7 @@ async def update_anime_details(
 async def delete_anime(
     anime_id: int,
     db: db_dep,
-    current_user: Annotated[models.Users, Depends(get_current_user)],
+    current_user: Annotated[models.User, Depends(get_current_user)],
 ):
     # Find and save the targeted anime
     query = select(models.Anime).where(

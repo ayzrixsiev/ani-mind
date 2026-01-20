@@ -14,7 +14,7 @@ db_dep = Annotated[AsyncSession, Depends(get_db)]
 
 @router.post("/login", status_code=status.HTTP_200_OK)
 async def verify_user(user_credentials: schemas.UserLogin, db: db_dep):
-    query = select(models.Users).where(models.Users.email == user_credentials.email)
+    query = select(models.User).where(models.User.email == user_credentials.email)
     result = await db.execute(query)
     db_user = result.scalars().first()
 

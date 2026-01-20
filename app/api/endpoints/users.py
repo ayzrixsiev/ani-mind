@@ -2,11 +2,11 @@ import logging
 from typing import Annotated
 from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 
 from app.core import schemas, models
 from app.core.database import get_db
-from app.core.security import hash_password, validate_admin_role
+from app.core.security import get_current_user, hash_password, validate_admin_role
 
 router = APIRouter(prefix="/profile", tags=["Users"])
 
@@ -21,7 +21,7 @@ db_dep = Annotated[AsyncSession, Depends(get_db)]
 )
 async def sign_up(user: schemas.CreateUser, db: db_dep):
     # Validate whether a user already exists
-    query = select(models.Users).where(models.Users.email == user.email)
+    query = select(models.User).where(models.User.email == user.email)
     result = await db.execute(query)
     db_user = result.scalars().first()
 
@@ -33,7 +33,7 @@ async def sign_up(user: schemas.CreateUser, db: db_dep):
     # Hash the password and add new user to the db
     try:
         hashed_pwd = hash_password(user.password)
-        new_user = models.Users(email=user.email, password=hashed_pwd, role=user.role)
+        new_user = models.User(email=user.email, password=hashed_pwd, role=user.role)
         db.add(new_user)
         await db.commit()
         await db.refresh(new_user)
@@ -50,7 +50,7 @@ async def sign_up(user: schemas.CreateUser, db: db_dep):
 # Get user
 @router.get("/{user_id}", response_model=schemas.UserResponse)
 async def get_user(user_id: int, db: db_dep):
-    query = select(models.Users).where(models.Users.id == user_id)
+    query = select(models.User).where(models.User.id == user_id)
     result = await db.execute(query)
     db_user = result.scalars().first()
 
@@ -61,10 +61,47 @@ async def get_user(user_id: int, db: db_dep):
     return db_user
 
 
+@router.get("/stats")
+async def get_user_stats(
+    current_user: Annotated[models.User, Depends(get_current_user)], db: db_dep
+):
+    stats_query = select(
+        func.count(models.Anime.id).label("total_anime"),
+        func.avg(models.Anime.rating).label("avg_rating"),
+    ).where(models.Anime.owner_id == current_user.id)
+
+    result = await db.execute(stats_query)
+    stats = result.first()
+
+    genre_query = (
+        select(
+            func.unnest(models.Anime.genres).label("genre"), func.count().label("count")
+        )
+        .where(models.Anime.owner_id == current_user.id)
+        .group_by("genre")
+        .order_by(desc("count"))
+        .limit(3)
+    )
+
+    genre_result = await db.execute(genre_query)
+    top_genres = [
+        {"genre": row.genre, "count": row.count} for row in genre_result.all()
+    ]
+
+    total_anime = stats.total_anime or 0
+    average_rating = round(float(stats.avg_rating), 2) if stats.avg_rating else 0.0
+
+    return {
+        "total_anime": total_anime,
+        "average_rating": average_rating,
+        "top_genres": top_genres,
+    }
+
+
 @router.delete("/{user_id}")
 async def delete_user(
     user_id: int,
-    admin: Annotated[models.Users, Depends(validate_admin_role)],
+    admin: Annotated[models.User, Depends(validate_admin_role)],
     db: db_dep,
 ):
     # Prevent Admin Suicide :D
@@ -75,7 +112,7 @@ async def delete_user(
         )
 
     # Find the User
-    query = select(models.Users).where(models.Users.id == user_id)
+    query = select(models.User).where(models.User.id == user_id)
     result = await db.execute(query)
     user_to_delete = result.scalars().first()
 

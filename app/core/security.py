@@ -68,7 +68,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: db
         raise credentials_exception
 
     # Go to the Database and find this specific person
-    query = select(models.Users).where(models.Users.id == user_id)
+    query = select(models.User).where(models.User.id == user_id)
     result = await db.execute(query)
     user = result.scalars().first()
 
@@ -79,7 +79,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: db
 
 
 async def validate_admin_role(
-    current_user: Annotated[models.Users, Depends(get_current_user)],
+    current_user: Annotated[models.User, Depends(get_current_user)],
 ):
     if current_user.role != "admin":
         raise HTTPException(
