@@ -2,11 +2,11 @@ import logging
 from typing import Annotated
 from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 
 from app.core import schemas, models
 from app.core.database import get_db
-from app.core.security import hash_password, validate_admin_role
+from app.core.security import get_current_user, hash_password, validate_admin_role
 
 router = APIRouter(prefix="/profile", tags=["Users"])
 
@@ -59,6 +59,43 @@ async def get_user(user_id: int, db: db_dep):
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     return db_user
+
+
+@router.get("/stats")
+async def get_user_stats(
+    current_user: Annotated[models.User, Depends(get_current_user)], db: db_dep
+):
+    stats_query = select(
+        func.count(models.Anime.id).label("total_anime"),
+        func.avg(models.Anime.rating).label("avg_rating"),
+    ).where(models.Anime.owner_id == current_user.id)
+
+    result = await db.execute(stats_query)
+    stats = result.first()
+
+    genre_query = (
+        select(
+            func.unnest(models.Anime.genres).label("genre"), func.count().label("count")
+        )
+        .where(models.Anime.owner_id == current_user.id)
+        .group_by("genre")
+        .order_by(desc("count"))
+        .limit(3)
+    )
+
+    genre_result = await db.execute(genre_query)
+    top_genres = [
+        {"genre": row.genre, "count": row.count} for row in genre_result.all()
+    ]
+
+    total_anime = stats.total_anime or 0
+    average_rating = round(float(stats.avg_rating), 2) if stats.avg_rating else 0.0
+
+    return {
+        "total_anime": total_anime,
+        "average_rating": average_rating,
+        "top_genres": top_genres,
+    }
 
 
 @router.delete("/{user_id}")
