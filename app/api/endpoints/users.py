@@ -13,7 +13,7 @@ router = APIRouter(prefix="/profile", tags=["Users"])
 db_dep = Annotated[AsyncSession, Depends(get_db)]
 
 
-# Add user
+# Sign up as a user
 @router.post(
     "/signup",
     response_model=schemas.UserResponse,
