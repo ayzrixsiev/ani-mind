@@ -9,7 +9,7 @@ services:
       - POSTGRES_PASSWORD=password123
       - POSTGRES_DB=fastapi
     ports:
-      - "5432:5432" # (Map) Computer Port 5432 -> Docker Port 5432.
+      - "5433:5432" # (Map) Computer Port 5432 -> Docker Port 5432.
   api: # name of the second container: api code
     build: . # "Look at my Dockerfile to build this box."
     ports:
