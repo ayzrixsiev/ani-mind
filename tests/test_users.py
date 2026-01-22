@@ -1,62 +1,109 @@
 import pytest
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_signup_success(client):
-
-    # Arrange the data
-    payload = {"email": "test@gmail.com", "password": "password123", "role": "admin"}
-    # Make an action
-    responnse = await client.post("/profile/signup", json=payload)
-    # Assert response
-    assert responnse.status_code == 201  # Check whether we got success response 201
-    data = responnse.json()  # Convert the resonpse into json/dict
-    assert data["email"] == "test@gmail.com"  # Validate the email that we send
-    assert "id" in data  # Check if db genegrated an id
-    assert "password" not in data  # Response should not return password
-
-
-@pytest.mark.asyncio
-async def test_signup_duplicate(client):
-
-    # First sign up so that after we can sign up again
-    payload = {"email": "test@gmail.com", "password": "password123"}
-    await client.post("/profile/signup", json=payload)
-
-    # Second sign up to test duplicate
+async def test_signup_success(client: AsyncClient):
+    """Successful signup returns 201 and correct user data (no password in response)"""
+    payload = {
+        "email": "newuser123@example.com",
+        "role": "user",
+        "password": "strongpass123",
+    }
     response = await client.post("/profile/signup", json=payload)
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["email"] == payload["email"]
+    assert "id" in data
+    assert "password" not in data
+    assert data["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_signup_duplicate_email(client: AsyncClient):
+    """Duplicate email returns 409 Conflict"""
+    payload = {
+        "email": "duplicate@example.com",
+        "role": "user",
+        "password": "pass12345678",
+    }
+    # First signup
+    await client.post("/profile/signup", json=payload)
+    # Second attempt
+    response = await client.post("/profile/signup", json=payload)
+
     assert response.status_code == 409
     assert response.json()["detail"] == "User already exists"
 
 
 @pytest.mark.asyncio
-async def test_login_success(client):
+async def test_signup_invalid_data(client: AsyncClient):
+    """Invalid payload returns 422 Unprocessable Entity"""
+    payload = {"email": "not-an-email", "password": "short"}
+    response = await client.post("/profile/signup", json=payload)
 
-    payload = {"email": "test@gmail.com", "password": "password123"}
-    await client.post("/profile/signup", json=payload)
-    response = await client.post("/profile/login", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
+    assert response.status_code == 422
+    assert "detail" in response.json()
 
 
 @pytest.mark.asyncio
-async def test_delete_user(client):
+async def test_login_success(client: AsyncClient):
+    """Login returns 200 with access_token"""
+    # First create user
+    payload = {
+        "email": "loginuser@example.com",
+        "password": "validpass123",
+        "role": "user",
+    }
+    await client.post("/profile/signup", json=payload)
 
-    # Normal user to delete
-    poor_user_to_delete = {"email": "pooruser@gmail.com", "password": "password"}
-    response_signup = await client.post("/profile/signup", json=poor_user_to_delete)
-    user_id = response_signup.json()["id"]
+    # Then login
+    login_payload = {"email": payload["email"], "password": payload["password"]}
+    response = await client.post("/profile/login", json=login_payload)
 
-    # Admin user that will delete
-    user_admin = {"email": "test@gmail.com", "password": "password", "role": "admin"}
-    await client.post("/profile/signup", json=user_admin)
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+    assert isinstance(data["access_token"], str)
+    assert len(data["access_token"]) > 20
 
-    user_login = {"email": "test@gmail.com", "password": "password"}
-    response_login = await client.post("/profile/login", json=user_login)
-    user_token = response_login.json()["access_token"]
 
-    response_delete = await client.delete(
-        f"/profile/{user_id}", headers={"Authorization": f"Bearer {user_token}"}
+@pytest.mark.asyncio
+async def test_delete_user_as_admin(client: AsyncClient, auth_headers_admin):
+    """Admin can delete another user"""
+    # Create normal user to delete
+    user_payload = {
+        "email": "todelete@example.com",
+        "password": "pass12345678",
+        "role": "user",
+    }
+    signup_resp = await client.post("/profile/signup", json=user_payload)
+    user_id = signup_resp.json()["id"]
+
+    # Delete as admin (using auth_headers from fixture)
+    delete_response = await client.delete(
+        f"/profile/{user_id}", headers=auth_headers_admin
     )
-    assert response_delete.status_code == 200
+
+    assert delete_response.status_code == 200
+
+    # Verify user is gone (optional but strong test)
+    get_response = await client.get(f"/profile/{user_id}", headers=auth_headers_admin)
+    assert get_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_user_as_non_admin_fails(client: AsyncClient, auth_headers_user):
+    """Normal user cannot delete another user (403 or 401 expected)"""
+    # Create user to delete
+    payload = {
+        "email": "protected@example.com",
+        "role": "user",
+        "password": "pass12345678",
+    }
+    signup_resp = await client.post("/profile/signup", json=payload)
+    user_id = signup_resp.json()["id"]
+
+    response = await client.delete(f"/profile/{user_id}", headers=auth_headers_user)
+    assert response.status_code in (403, 401)

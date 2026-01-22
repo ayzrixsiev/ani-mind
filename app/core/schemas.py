@@ -9,7 +9,7 @@ class AnimeStatus(str, Enum):
     WATCHING = "Watching"
     PLANNED = "Planned"
     DROPPED = "Dropped"
-    WATCHED = "Watched"
+    COMPLETED = "Completed"
 
 
 # Define the allowed genres

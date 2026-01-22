@@ -63,8 +63,11 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: db
         if user_id is None:
             raise credentials_exception
 
-    # In case if token is expired
+    except jwt.ExpiredSignatureError:
+        raise credentials_exception
     except jwt.DecodeError:
+        raise credentials_exception
+    except Exception:
         raise credentials_exception
 
     # Go to the Database and find this specific person

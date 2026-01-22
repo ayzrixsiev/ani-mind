@@ -39,7 +39,7 @@ async def get_anime_list(
     return user.anime_list
 
 
-# Add an anime
+# Add anime
 @router.post(
     "/list",
     response_model=schemas.AnimeResponse,
@@ -50,6 +50,7 @@ async def add_anime(
     db: db_dep,
     current_user: Annotated[models.User, Depends(get_current_user)],
 ):
+    await db.refresh(current_user, attribute_names=["anime_list"])
     try:
         new_anime_entry = models.Anime(**anime.model_dump())
         current_user.anime_list.append(new_anime_entry)
@@ -108,6 +109,7 @@ async def delete_anime(
     db: db_dep,
     current_user: Annotated[models.User, Depends(get_current_user)],
 ):
+    await db.refresh(current_user, attribute_names=["anime_list"])
     try:
         anime = next(a for a in current_user.anime_list if a.id == anime_id)
         current_user.anime_list.remove(anime)
