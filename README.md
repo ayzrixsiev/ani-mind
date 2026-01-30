@@ -1,6 +1,6 @@
-# FlowMind
+# Fin-Pulse
 
-**FlowMind** is a modern, containerized backend API designed to help users ingest, process, and gain insights from their personal financial data.  
+**Fin-Pulse** is a modern, containerized backend API designed to help users ingest, process, and gain insights from their personal financial data.  
 
 Through secure transaction logging, automated ETL pipelines, analytical modeling, and intelligent pattern detection, it turns raw financial logs into clear, actionable understanding of spending, trends, and opportunities.
 
