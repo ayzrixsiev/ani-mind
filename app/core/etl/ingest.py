@@ -69,7 +69,7 @@ def read_csv_file(file_content: bytes) -> List[Dict[str, str]]:
     # Filter out empty rows
     rows = [row for row in reader if any(row.values())]
 
-    print(f"📄 Read {len(rows)} rows from CSV")
+    print(f"Read {len(rows)} rows from CSV")
     return rows
 
 
@@ -94,7 +94,7 @@ async def fetch_from_api(
     Returns:
         List of transaction dicts from API
     """
-    print(f"🌐 Fetching from API: {api_url}")
+    print(f"Fetching from API: {api_url}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(api_url, headers=headers, params=params)
@@ -117,7 +117,7 @@ async def fetch_from_api(
         else:
             raise ValueError(f"Unexpected API format: {type(data)}")
 
-    print(f"✅ Fetched {len(transactions)} transactions")
+    print(f"Fetched {len(transactions)} transactions")
     return transactions
 
 
@@ -184,7 +184,7 @@ def to_standard_format(raw_row: Dict[str, Any], source: str = "csv") -> Dict[str
     amount = (
         raw_row.get("amount")
         or raw_row.get("Amount")
-        or raw_row.get("Сумма")  # Russian
+        or raw_row.get("Сумма")
         or raw_row.get("value")
     )
 
@@ -194,7 +194,7 @@ def to_standard_format(raw_row: Dict[str, Any], source: str = "csv") -> Dict[str
         or raw_row.get("Merchant")
         or raw_row.get("recipient")
         or raw_row.get("payee")
-        or raw_row.get("Получатель")  # Russian
+        or raw_row.get("Получатель")
     )
 
     # Extract category (if provided)
@@ -251,7 +251,7 @@ async def save_to_database(
     - Date might be weird: "15.01.2025"
     - Merchant might be messy: "MAKRO TASHKENT   "
 
-    That's OK! transform.py will clean it later.
+    That's ok, transform.py will clean it later.
 
     Args:
         transactions: List of standardized transaction dicts
@@ -283,14 +283,14 @@ async def save_to_database(
             transaction = models.Transaction(
                 owner_id=user_id,
                 account_id=account_id,
-                amount=str(txn["amount"]),  # Store as string for now
+                amount=str(txn["amount"]),
                 merchant=txn["merchant"],
                 category=txn["category"],
                 description=txn["description"],
                 external_id=txn["external_id"],
                 raw_payload=txn["raw_payload"],
                 transaction_hash=txn["transaction_hash"],
-                processed=False,  # NOT cleaned yet!
+                processed=False,  # NOT cleaned yet
             )
 
             db.add(transaction)
@@ -302,10 +302,10 @@ async def save_to_database(
     # Save to database
     try:
         await db.commit()
-        print(f"✅ Saved {saved} transactions, skipped {duplicates} duplicates")
+        print(f"Saved {saved} transactions, skipped {duplicates} duplicates")
     except Exception as e:
         await db.rollback()
-        print(f"❌ Database error: {e}")
+        print(f"Database error: {e}")
         raise
 
     return {"saved": saved, "duplicates": duplicates, "errors": errors}
