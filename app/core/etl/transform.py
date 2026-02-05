@@ -1,27 +1,3 @@
-# app/core/etl/transform.py
-"""
-TRANSFORM MODULE - Clean and normalize raw transaction data
-
-Purpose:
-    1. Fix messy data from different sources
-    2. Standardize formats (dates, amounts, currencies)
-    3. Auto-categorize transactions
-    4. Mark transactions as "processed"
-
-Data Flow:
-    raw_data (from ingest.py) → clean_date() → clean_amount() → categorize() → clean_data
-                                                                                   ↓
-                                                                           Update in database
-                                                                                   ↓
-                                                                          Mark as processed
-
-Why this matters:
-    - Banks export "1,500,000" with commas → we need "1500000.00"
-    - Uzbek dates "15.01.2025" → we need "2025-01-15"
-    - "MAKRO TASHKENT" and "Makro" → should be same merchant
-    - Missing categories → need smart auto-categorization
-"""
-
 import re
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, date
@@ -33,14 +9,14 @@ from sqlalchemy import select, update
 from app.core import models
 
 
-def normalize_date(date: any) -> Optional[date]:
+def parse_date(date: any) -> Optional[date]:
 
     # Check if we got anything
     if not date:
         return None
 
     # Clean white spaces and common separators
-    date_str = str(date_str).strip()
+    date_str = str(date).strip()
 
     # Create common patterns
     formats = [
@@ -72,7 +48,7 @@ def normalize_date(date: any) -> Optional[date]:
     match = re.search(date_pattern, date_str)
     if match:
         extracted_date = match.group(1)
-        return normalize_date(extracted_date)
+        return parse_date(extracted_date)
 
     return None
 
@@ -80,86 +56,46 @@ def normalize_date(date: any) -> Optional[date]:
 def clean_transaction_date(transaction_date: Any) -> Optional[date]:
     """
     Main function to clean transaction dates.
-
     This is the public interface that other modules will call.
     """
     if not transaction_date:
-        return date.today()  # Default to today if missing
+        # Default to today if missing
+        return date.today()
 
-    return parse_uzbek_date(str(transaction_date))
-
-
-# ============================================================================
-# STEP 2: CLEAN AND STANDARDIZE AMOUNTS
-# ============================================================================
+    return parse_date(str(transaction_date))
 
 
-def parse_amount(amount_str: str) -> Optional[Decimal]:
-    """
-    Parse amount strings to Decimal numbers.
+def parse_amount(value: Any) -> Optional[Decimal]:
 
-    Handles:
-        - "1,500,000" → Decimal('1500000')
-        - "1,500,000.50" → Decimal('1500000.50')
-        - "-50000" → Decimal('-50000')
-        - "1 500 000" (space separator)
-        - "50000 so'm" → Decimal('50000')
-        - "$100.50" → Decimal('100.50')
-        - "100.50 USD" → Decimal('100.50')
-
-    Why Decimal instead of float?
-        Money needs precision - float has rounding errors
-        Banking requires exact calculations
-        Reporting must be accurate
-
-    Args:
-        amount_str: Raw amount string
-
-    Returns:
-        Decimal object or None if parsing fails
-
-    Examples:
-        "1,500,000.50" → Decimal('1500000.50')
-        "-50,000" → Decimal('-50000')
-        "100 USD" → Decimal('100')
-    """
-    if not amount_str:
+    if not value:
         return None
 
-    # Convert to string and clean
-    amount_str = str(amount_str).strip()
+    value_str = str(value).strip()
 
-    # Remove currency symbols and words
     currency_patterns = [
-        r"[UZS\s]*$",  # Remove "UZS" at end
-        r"USD\s*$",  # Remove "USD" at end
-        r"\$",  # Remove dollar sign
-        r"so'm",  # Remove "so'm" (Uzbek currency)
-        r"сум",  # Remove "сум" (Russian)
+        r"[UZS\s]*$",
+        r"USD\s*$",
+        r"\$",
+        r"so'm",
+        r"сум",
     ]
 
     for pattern in currency_patterns:
-        amount_str = re.sub(pattern, "", amount_str, flags=re.IGNORECASE)
+        value_str = re.sub(pattern, "", value_str, flags=re.IGNORECASE)
 
-    # Handle spaces as thousand separators: "1 500 000" → "1500000"
-    amount_str = amount_str.replace(" ", "")
+    value_str = value_str.replace(" ", "")
 
-    # Handle commas as thousand separators: "1,500,000" → "1500000"
-    # But keep comma as decimal separator if it's the last one: "1,500" → "1500"
-    if "," in amount_str:
-        parts = amount_str.split(",")
+    if "," in value_str:
+        parts = value_str.split(",")
         if len(parts) == 2 and len(parts[1]) <= 2:
-            # Likely decimal comma: "1,50" → "1.50"
-            amount_str = ".".join(parts)
+            value_str = ".".join(parts)
         else:
-            # Thousand separators: "1,500,000" → "1500000"
-            amount_str = "".join(parts)
+            value_str = "".join(parts)
 
-    # Clean any remaining non-numeric characters except minus and dot
-    amount_str = re.sub(r"[^0-9.-]", "", amount_str)
+    value_str = re.sub(r"[^0-9.-]", "", value_str)
 
     try:
-        return Decimal(amount_str)
+        return Decimal(value_str)
     except (InvalidOperation, ValueError):
         return None
 
@@ -167,7 +103,6 @@ def parse_amount(amount_str: str) -> Optional[Decimal]:
 def clean_transaction_amount(amount: Any) -> Optional[Decimal]:
     """
     Main function to clean transaction amounts.
-
     Returns positive Decimal for income, negative for expenses.
     """
     if amount is None:
@@ -177,38 +112,8 @@ def clean_transaction_amount(amount: Any) -> Optional[Decimal]:
     return cleaned
 
 
-# ============================================================================
-# STEP 3: STANDARDIZE MERCHANT NAMES
-# ============================================================================
-
-
 def normalize_merchant_name(merchant: Optional[str]) -> Optional[str]:
-    """
-    Clean and normalize merchant names for better grouping.
 
-    Handles:
-        - "MAKRO TASHKENT" → "Makro"
-        - "STARBUCKS COFFEE" → "Starbucks"
-        - "Evos Restoran" → "Evos"
-        - "OLCHA.UZ" → "Olcha"
-        - "  MAKRO  " → "Makro" (remove whitespace)
-
-    Why normalize?
-        Better spend analysis (Makro appears once, not 5 times)
-        Easier searching
-        Accurate category assignment
-
-    Args:
-        merchant: Raw merchant name
-
-    Returns:
-        Normalized merchant name
-
-    Examples:
-        "MAKRO TASHKENT" → "Makro"
-        "STARBUCKS #123" → "Starbucks"
-        None → None
-    """
     if not merchant:
         return None
 
@@ -247,7 +152,6 @@ def normalize_merchant_name(merchant: Optional[str]) -> Optional[str]:
     # Convert to lowercase for matching
     merchant_lower = merchant.lower()
 
-    # Try to match patterns
     for pattern, replacement in brand_mappings.items():
         if re.search(pattern, merchant_lower):
             return replacement
@@ -268,47 +172,10 @@ def normalize_merchant_name(merchant: Optional[str]) -> Optional[str]:
     return merchant if merchant else None
 
 
-# ============================================================================
-# STEP 4: AUTO-CATEGORIZE TRANSACTIONS
-# ============================================================================
-
-
 def categorize_transaction(
     merchant: Optional[str], description: Optional[str], amount: Optional[Decimal]
 ) -> Optional[str]:
-    """
-    Automatically assign category based on merchant and description.
 
-    Categories used in Uzbekistan:
-        - Food & Restaurants
-        - Transport & Taxi
-        - Shopping & Retail
-        - Health & Medicine
-        - Education
-        - Entertainment & Leisure
-        - Bills & Utilities
-        - Transfer & Withdrawal
-        - Salary & Income
-        - Other
-
-    Why auto-categorize?
-        📊 Users don't want to categorize hundreds of transactions
-        🎯 Smart defaults save time
-        ✋ Still allows manual overrides
-
-    Args:
-        merchant: Normalized merchant name
-        description: Transaction description
-        amount: Transaction amount (positive/negative helps categorize)
-
-    Returns:
-        Category name or None if uncertain
-
-    Examples:
-        merchant="Starbucks", amount=-50000 → "Food & Restaurants"
-        merchant="Taxi", amount=-25000 → "Transport & Taxi"
-        merchant="Salary", amount=5000000 → "Salary & Income"
-    """
     # Combine search text
     search_text = f"{merchant or ''} {description or ''}".lower()
 
@@ -459,35 +326,10 @@ def categorize_transaction(
     return "Other"
 
 
-# ============================================================================
-# STEP 5: MAIN TRANSFORMATION FUNCTION
-# ============================================================================
-
-
 async def transform_transaction(
     transaction: models.Transaction, db: AsyncSession
 ) -> bool:
-    """
-    Transform a single transaction from raw to clean.
 
-    This is where all the cleaning functions come together!
-
-    Args:
-        transaction: Raw transaction from database
-        db: Database session for updates
-
-    Returns:
-        True if transformation succeeded, False if failed
-
-    Process:
-        1. Extract raw data from raw_payload
-        2. Clean date → format properly
-        3. Clean amount → remove commas, convert to Decimal
-        4. Normalize merchant → standard naming
-        5. Auto-categorize → smart category assignment
-        6. Update database with clean data
-        7. Mark as processed = True
-    """
     try:
         # Get raw data (what we originally received)
         raw_data = transaction.raw_payload or {}
@@ -506,7 +348,7 @@ async def transform_transaction(
                 cleaned_date = None
 
         if cleaned_date is None:
-            print(f"⚠️  Could not parse date for transaction {transaction.id}")
+            print(f"Could not parse date for transaction {transaction.id}")
             return False
 
         # === STEP 2: Clean Amount ===
@@ -522,7 +364,7 @@ async def transform_transaction(
             cleaned_amount = amount_attr if amount_attr is not None else None
 
         if cleaned_amount is None:
-            print(f"⚠️  Could not parse amount for transaction {transaction.id}")
+            print(f"Could not parse amount for transaction {transaction.id}")
             return False
 
         # === STEP 3: Normalize Merchant ===
