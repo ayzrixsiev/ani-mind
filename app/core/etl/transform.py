@@ -326,6 +326,7 @@ def categorize_transaction(
     return "Other"
 
 
+# Orchestration
 async def transform_transaction(
     transaction: models.Transaction, db: AsyncSession
 ) -> bool:
@@ -334,13 +335,10 @@ async def transform_transaction(
         # Get raw data (what we originally received)
         raw_data = transaction.raw_payload or {}
 
-        # === STEP 1: Clean Date ===
-        # Try raw data first, then fallback to stored date
         raw_date = raw_data.get("date") or raw_data.get("Date") or raw_data.get("Дата")
         if raw_date:
             cleaned_date = clean_transaction_date(raw_date)
         else:
-            # Convert stored datetime to date - access the attribute value
             created_at_attr = getattr(transaction, "created_at", None)
             if created_at_attr is not None:
                 cleaned_date = created_at_attr.date()
@@ -351,15 +349,12 @@ async def transform_transaction(
             print(f"Could not parse date for transaction {transaction.id}")
             return False
 
-        # === STEP 2: Clean Amount ===
-        # Try multiple sources for amount
         raw_amount = (
             raw_data.get("amount") or raw_data.get("Amount") or raw_data.get("Сумма")
         )
         if raw_amount:
             cleaned_amount = clean_transaction_amount(raw_amount)
         else:
-            # Use existing amount from database - access the attribute value
             amount_attr = getattr(transaction, "amount", None)
             cleaned_amount = amount_attr if amount_attr is not None else None
 
@@ -367,23 +362,18 @@ async def transform_transaction(
             print(f"Could not parse amount for transaction {transaction.id}")
             return False
 
-        # === STEP 3: Normalize Merchant ===
         raw_merchant = raw_data.get("merchant") or raw_data.get("Merchant")
         if raw_merchant:
             cleaned_merchant = normalize_merchant_name(raw_merchant)
         else:
-            # Access the merchant attribute value
             merchant_attr = getattr(transaction, "merchant", None)
             cleaned_merchant = merchant_attr
 
-        # === STEP 4: Auto-Categorize ===
         raw_description = raw_data.get("description") or raw_data.get("Description")
         if not raw_description:
-            # Access the description attribute value
             description_attr = getattr(transaction, "description", None)
             raw_description = description_attr
 
-        # Use existing category if user already set it, otherwise auto-categorize
         category_attr = getattr(transaction, "category", None)
         if category_attr is None or str(category_attr) == "":
             cleaned_category = categorize_transaction(
@@ -394,15 +384,13 @@ async def transform_transaction(
         else:
             cleaned_category = category_attr
 
-        # === STEP 5: Update Database ===
-        # Update transaction with clean data
         update_data = {
             "amount": cleaned_amount,
             "created_at": cleaned_date,
             "merchant": cleaned_merchant,
             "category": cleaned_category,
             "description": raw_description,
-            "processed": True,  # Mark as cleaned!
+            "processed": True,  # Mark as cleaned
             "updated_at": datetime.now(),
         }
 
@@ -417,45 +405,21 @@ async def transform_transaction(
         await db.commit()
 
         print(
-            f"✅ Transformed transaction {transaction.id}: {cleaned_merchant} → {cleaned_category}"
+            f"Transformed transaction {transaction.id}: {cleaned_merchant} → {cleaned_category}"
         )
         return True
 
     except Exception as e:
-        print(f"❌ Error transforming transaction {transaction.id}: {e}")
+        print(f"Error transforming transaction {transaction.id}: {e}")
         await db.rollback()
         return False
 
 
-# ============================================================================
-# STEP 6: BATCH PROCESSING
-# ============================================================================
-
-
+# Call orchestration
 async def transform_all_unprocessed(
     user_id: int, db: AsyncSession, batch_size: int = 100
 ) -> Dict[str, int]:
-    """
-    Transform all unprocessed transactions for a user.
 
-    This is the main function you'll call from your API endpoints.
-
-    Args:
-        user_id: Which user's transactions to process
-        db: Database session
-        batch_size: How many transactions to process at once
-
-    Returns:
-        Statistics about what was processed
-
-    Example result:
-        {
-            "total": 250,
-            "processed": 247,
-            "failed": 3,
-            "skipped": 0
-        }
-    """
     # Get all unprocessed transactions for this user
     stmt = (
         select(models.Transaction)
@@ -471,7 +435,7 @@ async def transform_all_unprocessed(
 
     stats = {"total": len(transactions), "processed": 0, "failed": 0, "skipped": 0}
 
-    print(f"🔄 Starting transformation of {len(transactions)} transactions...")
+    print(f"Starting transformation of {len(transactions)} transactions...")
 
     for transaction in transactions:
         success = await transform_transaction(transaction, db)
@@ -480,40 +444,20 @@ async def transform_all_unprocessed(
         else:
             stats["failed"] += 1
 
-    print(
-        f"✅ Transformation complete: {stats['processed']}/{stats['total']} processed"
-    )
+    print(f"Transformation complete: {stats['processed']}/{stats['total']} processed")
     return stats
 
 
-# ============================================================================
-# STEP 7: UTILITY FUNCTIONS
-# ============================================================================
-
-
+# Reprocess a certain transaction, useful for debugging
 async def reprocess_transaction(transaction_id: int, db: AsyncSession) -> bool:
-    """
-    Re-process a single transaction (useful for debugging or fixes).
 
-    Sometimes you need to re-run transformation:
-    - Fixed a bug in categorization logic
-    - Updated merchant mappings
-    - User wants to re-categorize with new rules
-
-    Args:
-        transaction_id: Specific transaction to reprocess
-        db: Database session
-
-    Returns:
-        True if successful
-    """
     # Get the transaction
     stmt = select(models.Transaction).where(models.Transaction.id == transaction_id)
     result = await db.execute(stmt)
     transaction = result.scalar_one_or_none()
 
     if not transaction:
-        print(f"❌ Transaction {transaction_id} not found")
+        print(f"Transaction {transaction_id} not found")
         return False
 
     # Mark as unprocessed first
@@ -528,77 +472,3 @@ async def reprocess_transaction(transaction_id: int, db: AsyncSession) -> bool:
 
     # Now transform it
     return await transform_transaction(transaction, db)
-
-
-# ============================================================================
-# EXAMPLE USAGE
-# ============================================================================
-
-"""
-EXAMPLE 1: Transform all transactions for a user
-================================================
-
-@router.post("/transactions/transform")
-async def transform_transactions(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    stats = await transform_all_unprocessed(
-        user_id=current_user.id,
-        db=db
-    )
-    
-    return {
-        "message": f"Transformed {stats['processed']} transactions",
-        "stats": stats
-    }
-
-
-EXAMPLE 2: Reprocess a specific transaction
-==========================================
-
-@router.post("/transactions/{transaction_id}/reprocess")
-async def reprocess_single(
-    transaction_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    # Verify ownership
-    transaction = await db.get(Transaction, transaction_id)
-    if not transaction or transaction.owner_id != current_user.id:
-        raise HTTPException(404, "Transaction not found")
-    
-    success = await reprocess_transaction(transaction_id, db)
-    
-    if success:
-        return {"message": "Transaction reprocessed successfully"}
-    else:
-        raise HTTPException(500, "Failed to reprocess transaction")
-
-
-EXAMPLE 3: Manual category override
-===================================
-
-Sometimes the auto-categorization gets it wrong. Let users fix it:
-
-@router.put("/transactions/{transaction_id}/category")
-async def update_category(
-    transaction_id: int,
-    new_category: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    # Update category
-    stmt = update(models.Transaction).where(
-        models.Transaction.id == transaction_id,
-        models.Transaction.owner_id == current_user.id
-    ).values(category=new_category)
-    
-    await db.execute(stmt)
-    await db.commit()
-    
-    return {"message": "Category updated"}
-"""
