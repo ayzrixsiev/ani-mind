@@ -1,232 +1,111 @@
-# app/core/etl/load.py
-"""
-LOAD MODULE - Store processed data efficiently
-
-Purpose:
-    1. Move processed data to optimized tables
-    2. Create indexes for fast queries
-    3. Update account balances
-    4. Maintain data integrity
-
-Data Flow:
-    transform.py (clean data) → create_indexes() → update_balances() → optimized_storage
-                                                                   ↓
-                                                           Ready for aggregation
-
-Why load module?
-    📊 Fast queries for dashboards
-    💰 Accurate balance calculations
-    🔍 Quick search and filtering
-    📈 Efficient reporting
-"""
-
 from typing import Dict, Any, List, Optional
 from datetime import datetime, date
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, and_, or_, Index
+from sqlalchemy import select, update, func
 from sqlalchemy.orm import selectinload
 
 from app.core import models
 
 
-# ============================================================================
-# STEP 1: UPDATE ACCOUNT BALANCES
-# ============================================================================
-
-
 async def calculate_account_balance(
-    account_id: int,
-    db: AsyncSession,
-    end_date: Optional[date] = None
+    account_id: int, db: AsyncSession, end_date: Optional[date] = None
 ) -> Optional[Decimal]:
-    """
-    Calculate current balance for an account.
-    
-    Balance = Sum of all transaction amounts
-    - Positive amounts increase balance (income)
-    - Negative amounts decrease balance (expenses)
-    
-    Args:
-        account_id: Which account to calculate
-        db: Database session
-        end_date: Optional end date for historical balance
-        
-    Returns:
-        Current balance or None if account not found
-        
-    Examples:
-        Account started with 0
-        +5,000,000 (salary) → 5,000,000
-        -50,000 (coffee) → 4,950,000
-        -1,500,000 (shopping) → 3,450,000
-    """
+
     # Build query for transactions
     query = select(func.coalesce(func.sum(models.Transaction.amount), 0)).where(
         models.Transaction.account_id == account_id,
-        models.Transaction.processed == True  # Only include processed transactions
+        models.Transaction.processed == True,
     )
-    
-    # Add date filter if specified
+
     if end_date:
         query = query.where(models.Transaction.created_at <= end_date)
-    
+
     result = await db.execute(query)
     balance = result.scalar()
-    
-    return Decimal(str(balance)) if balance else Decimal('0')
+
+    return Decimal(str(balance)) if balance else Decimal("0")
 
 
-async def update_account_balance(
-    account_id: int,
-    db: AsyncSession
-) -> bool:
-    """
-    Update the balance field in the accounts table.
-    
-    This should be called after new transactions are processed.
-    
-    Args:
-        account_id: Account to update
-        db: Database session
-        
-    Returns:
-        True if updated successfully
-        
-    Process:
-        1. Calculate new balance from transactions
-        2. Update account.balance field
-        3. Update account.updated_at timestamp
-    """
+async def update_account_balance(account_id: int, db: AsyncSession) -> bool:
+
     try:
         # Calculate current balance
         new_balance = await calculate_account_balance(account_id, db)
-        
+
         if new_balance is None:
             return False
-        
+
         # Update account record
-        stmt = update(models.Account).where(
-            models.Account.id == account_id
-        ).values(
-            balance=new_balance,
-            updated_at=datetime.now()
+        stmt = (
+            update(models.Account)
+            .where(models.Account.id == account_id)
+            .values(balance=new_balance, updated_at=datetime.now())
         )
-        
+
         await db.execute(stmt)
         await db.commit()
-        
-        print(f"💰 Updated account {account_id} balance: {new_balance}")
+
+        print(f"Updated account {account_id} balance: {new_balance}")
         return True
-        
+
     except Exception as e:
-        print(f"❌ Error updating account balance: {e}")
+        print(f"Error updating account balance: {e}")
         await db.rollback()
         return False
 
 
-async def update_all_account_balances(
-    user_id: int,
-    db: AsyncSession
-) -> Dict[str, int]:
-    """
-    Update balances for all user's accounts.
-    
-    This is typically called after:
-    - New transactions are processed
-    - Transactions are deleted/modified
-    - Initial data import
-    
-    Args:
-        user_id: User whose accounts to update
-        db: Database session
-        
-    Returns:
-        Statistics: {updated: 5, failed: 0}
-    """
+async def update_all_account_balances(user_id: int, db: AsyncSession) -> Dict[str, int]:
+
     # Get all user's accounts
     stmt = select(models.Account).where(models.Account.owner_id == user_id)
     result = await db.execute(stmt)
     accounts = result.scalars().all()
-    
+
     stats = {"updated": 0, "failed": 0}
-    
+
     for account in accounts:
         success = await update_account_balance(account.id, db)
         if success:
             stats["updated"] += 1
         else:
             stats["failed"] += 1
-    
-    print(f"📊 Balance update complete: {stats['updated']}/{len(accounts)} accounts updated")
+
+    print(
+        f"Balance update complete: {stats['updated']}/{len(accounts)} accounts updated"
+    )
     return stats
 
 
-# ============================================================================
-# STEP 2: CREATE OPTIMIZED INDEXES
-# ============================================================================
-
-
 async def create_performance_indexes(db: AsyncSession) -> bool:
-    """
-    Create indexes for common query patterns.
-    
-    Why indexes matter:
-        🚀 Fast dashboard loading (100x faster queries)
-        🔍 Quick transaction search
-        📈 Efficient reporting queries
-        💾 Less database load
-    
-    Indexes we create:
-        1. (user_id, created_at) - for date range queries
-        2. (user_id, category) - for category filtering
-        3. (user_id, merchant) - for merchant search
-        4. (account_id, created_at) - for account statements
-        5. (processed, created_at) - for ETL processing
-    
-    Args:
-        db: Database session
-        
-    Returns:
-        True if indexes created successfully
-        
-    Note: This should be run once during setup
-    """
+
     try:
-        # These indexes should be in the model definition,
-        # but we can create them here if needed
-        
         # Common query patterns and their indexes:
         index_patterns = [
             # User dashboard: "Get user's transactions for last 30 days"
             "CREATE INDEX IF NOT EXISTS idx_user_date ON transactions(owner_id, created_at DESC)",
-            
             # Category filtering: "Get all food transactions for user"
             "CREATE INDEX IF NOT EXISTS idx_user_category ON transactions(owner_id, category)",
-            
             # Merchant search: "Find all Starbucks transactions"
             "CREATE INDEX IF NOT EXISTS idx_user_merchant ON transactions(owner_id, merchant)",
-            
             # Account statements: "Get transactions for account X"
             "CREATE INDEX IF NOT EXISTS idx_account_date ON transactions(account_id, created_at DESC)",
-            
             # ETL processing: "Find unprocessed transactions"
             "CREATE INDEX IF NOT EXISTS idx_processed_date ON transactions(processed, created_at)",
-            
             # Search queries: "Search by description"
             "CREATE INDEX IF NOT EXISTS idx_description_text ON transactions USING gin(to_tsvector('english', description))",
         ]
-        
+
         for index_sql in index_patterns:
             await db.execute(index_sql)
-        
+
         await db.commit()
-        print("🚀 Performance indexes created successfully")
+        print("Performance indexes created successfully")
         return True
-        
+
     except Exception as e:
-        print(f"❌ Error creating indexes: {e}")
+        print(f"Error creating indexes: {e}")
         await db.rollback()
         return False
 
@@ -237,12 +116,11 @@ async def create_performance_indexes(db: AsyncSession) -> bool:
 
 
 async def validate_transaction_data(
-    transaction_id: int,
-    db: AsyncSession
+    transaction_id: int, db: AsyncSession
 ) -> Dict[str, Any]:
     """
     Validate a single transaction for data integrity.
-    
+
     What we check:
         ✅ Amount is not null and is valid Decimal
         ✅ Date is valid and not in the distant future
@@ -250,14 +128,14 @@ async def validate_transaction_data(
         ✅ Account (if specified) belongs to owner
         ✅ Category is in allowed list
         ✅ No duplicate hashes
-    
+
     Args:
         transaction_id: Transaction to validate
         db: Database session
-        
+
     Returns:
         Validation result with any errors found
-        
+
     Example:
         {
             "valid": True,
@@ -266,28 +144,32 @@ async def validate_transaction_data(
         }
     """
     # Get the transaction with related data
-    stmt = select(models.Transaction).options(
-        selectinload(models.Transaction.owner),
-        selectinload(models.Transaction.account)
-    ).where(models.Transaction.id == transaction_id)
-    
+    stmt = (
+        select(models.Transaction)
+        .options(
+            selectinload(models.Transaction.owner),
+            selectinload(models.Transaction.account),
+        )
+        .where(models.Transaction.id == transaction_id)
+    )
+
     result = await db.execute(stmt)
     transaction = result.scalar_one_or_none()
-    
+
     if not transaction:
         return {"valid": False, "errors": ["Transaction not found"], "warnings": []}
-    
+
     errors = []
     warnings = []
-    
+
     # === VALIDATION CHECKS ===
-    
+
     # 1. Amount validation
     if not transaction.amount:
         errors.append("Amount cannot be null")
     elif transaction.amount == 0:
         warnings.append("Amount is zero - possible data entry error")
-    
+
     # 2. Date validation
     if not transaction.created_at:
         errors.append("Date cannot be null")
@@ -295,28 +177,28 @@ async def validate_transaction_data(
         # Check if date is reasonable (not in far future or past)
         today = date.today()
         txn_date = transaction.created_at.date()
-        
+
         if txn_date > today:
             warnings.append("Transaction date is in the future")
         elif txn_date.year < 2000:
             warnings.append("Transaction date is very old - verify data")
-    
+
     # 3. Owner validation
     if not transaction.owner:
         errors.append("Transaction has no owner")
-    
+
     # 4. Account validation
     if transaction.account_id:
         if not transaction.account:
             errors.append("Referenced account not found")
         elif transaction.account.owner_id != transaction.owner_id:
             errors.append("Account does not belong to transaction owner")
-    
+
     # 5. Category validation
     valid_categories = [
         "Food & Restaurants",
         "Transport & Taxi",
-        "Shopping & Retail", 
+        "Shopping & Retail",
         "Health & Medicine",
         "Education",
         "Entertainment & Leisure",
@@ -324,95 +206,90 @@ async def validate_transaction_data(
         "Bank & Financial Services",
         "Transfer & Income",
         "Salary & Income",
-        "Other"
+        "Other",
     ]
-    
+
     if transaction.category and transaction.category not in valid_categories:
         warnings.append(f"Unknown category: {transaction.category}")
-    
+
     # 6. Merchant validation
     if not transaction.merchant and abs(float(transaction.amount)) > 100000:
         warnings.append("Large transaction missing merchant name")
-    
-    return {
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings
-    }
+
+    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
-async def validate_user_data(
-    user_id: int,
-    db: AsyncSession
-) -> Dict[str, Any]:
+async def validate_user_data(user_id: int, db: AsyncSession) -> Dict[str, Any]:
     """
     Validate all data for a user.
-    
+
     This runs comprehensive checks on:
     - All transactions
     - Account balances
     - Data consistency
-    
+
     Args:
         user_id: User to validate
         db: Database session
-        
+
     Returns:
         Comprehensive validation report
     """
     # Get all user's transactions
-    stmt = select(models.Transaction).where(
-        models.Transaction.owner_id == user_id
-    )
+    stmt = select(models.Transaction).where(models.Transaction.owner_id == user_id)
     result = await db.execute(stmt)
     transactions = result.scalars().all()
-    
+
     report = {
         "total_transactions": len(transactions),
         "valid_transactions": 0,
         "invalid_transactions": 0,
         "warnings": [],
         "common_errors": {},
-        "balance_issues": []
+        "balance_issues": [],
     }
-    
+
     # Validate each transaction
     for txn in transactions:
         validation = await validate_transaction_data(txn.id, db)
-        
+
         if validation["valid"]:
             report["valid_transactions"] += 1
         else:
             report["invalid_transactions"] += 1
-            
+
             # Track common errors
             for error in validation["errors"]:
                 if error not in report["common_errors"]:
                     report["common_errors"][error] = 0
                 report["common_errors"][error] += 1
-        
+
         # Collect warnings
         report["warnings"].extend(validation["warnings"])
-    
+
     # Check account balance consistency
     accounts_stmt = select(models.Account).where(models.Account.owner_id == user_id)
     accounts_result = await db.execute(accounts_stmt)
     accounts = accounts_result.scalars().all()
-    
+
     for account in accounts:
         # Calculate balance from transactions
         calculated_balance = await calculate_account_balance(account.id, db)
-        
+
         if calculated_balance != account.balance:
-            report["balance_issues"].append({
-                "account_id": account.id,
-                "account_name": account.name,
-                "stored_balance": float(account.balance),
-                "calculated_balance": float(calculated_balance),
-                "difference": float(account.balance - calculated_balance)
-            })
-    
-    print(f"🔍 Validation complete: {report['valid_transactions']}/{report['total_transactions']} valid")
+            report["balance_issues"].append(
+                {
+                    "account_id": account.id,
+                    "account_name": account.name,
+                    "stored_balance": float(account.balance),
+                    "calculated_balance": float(calculated_balance),
+                    "difference": float(account.balance - calculated_balance),
+                }
+            )
+
+    print(
+        f"🔍 Validation complete: {report['valid_transactions']}/{report['total_transactions']} valid"
+    )
     return report
 
 
@@ -421,25 +298,22 @@ async def validate_user_data(
 # ============================================================================
 
 
-async def load_processed_data(
-    user_id: int,
-    db: AsyncSession
-) -> Dict[str, Any]:
+async def load_processed_data(user_id: int, db: AsyncSession) -> Dict[str, Any]:
     """
     Main loading function - optimize storage after transformation.
-    
+
     This is called after transform.py has cleaned the data.
-    
+
     Process:
         1. Update all account balances
         2. Ensure performance indexes exist
         3. Validate data integrity
         4. Mark loading as complete
-    
+
     Args:
         user_id: User whose data to load
         db: Database session
-        
+
     Returns:
         Loading statistics
     """
@@ -447,77 +321,78 @@ async def load_processed_data(
         "accounts_updated": 0,
         "accounts_failed": 0,
         "data_valid": True,
-        "issues_found": []
+        "issues_found": [],
     }
-    
+
     print(f"📦 Loading processed data for user {user_id}...")
-    
+
     # === STEP 1: Update Account Balances ===
     balance_stats = await update_all_account_balances(user_id, db)
     stats["accounts_updated"] = balance_stats["updated"]
     stats["accounts_failed"] = balance_stats["failed"]
-    
+
     # === STEP 2: Ensure Indexes ===
     await create_performance_indexes(db)
-    
+
     # === STEP 3: Validate Data ===
     validation_report = await validate_user_data(user_id, db)
-    
+
     if validation_report["invalid_transactions"] > 0:
         stats["data_valid"] = False
         stats["issues_found"] = validation_report["common_errors"]
-    
+
     # === STEP 4: Update User Stats ===
     # You could add a user_stats table here to track:
     # - Total transactions
     # - Total spent by category
     # - Average transaction amount
     # etc.
-    
+
     print(f"✅ Loading complete: {stats['accounts_updated']} balances updated")
     return stats
 
 
 async def get_user_account_summary(
-    user_id: int,
-    db: AsyncSession
+    user_id: int, db: AsyncSession
 ) -> List[Dict[str, Any]]:
     """
     Get summary of all user's accounts with balances.
-    
+
     Useful for dashboard display:
     - Total balance across all accounts
     - Individual account balances
     - Recent transaction counts
-    
+
     Args:
         user_id: User to summarize
         db: Database session
-        
+
     Returns:
         List of account summaries
     """
     # Get all user's accounts with transaction counts
-    stmt = select(models.Account).where(
-        models.Account.owner_id == user_id,
-        models.Account.is_active == True
-    ).options(selectinload(models.Account.transactions))
-    
+    stmt = (
+        select(models.Account)
+        .where(models.Account.owner_id == user_id, models.Account.is_active == True)
+        .options(selectinload(models.Account.transactions))
+    )
+
     result = await db.execute(stmt)
     accounts = result.scalars().all()
-    
+
     summaries = []
-    
+
     for account in accounts:
         # Count transactions in last 30 days
-        thirty_days_ago = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        thirty_days_ago = datetime.now().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         thirty_days_ago = thirty_days_ago.replace(day=thirty_days_ago.day - 30)
-        
+
         recent_txns = [
-            txn for txn in account.transactions 
-            if txn.created_at >= thirty_days_ago
+            txn for txn in account.transactions if txn.created_at >= thirty_days_ago
         ]
-        
+
         summary = {
             "account_id": account.id,
             "account_name": account.name,
@@ -527,11 +402,13 @@ async def get_user_account_summary(
             "provider": account.provider,
             "total_transactions": len(account.transactions),
             "recent_transactions_30d": len(recent_txns),
-            "last_updated": account.updated_at.isoformat() if account.updated_at else None
+            "last_updated": (
+                account.updated_at.isoformat() if account.updated_at else None
+            ),
         }
-        
+
         summaries.append(summary)
-    
+
     return summaries
 
 
