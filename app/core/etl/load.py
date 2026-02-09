@@ -290,21 +290,7 @@ async def load_processed_data(user_id: int, db: AsyncSession) -> Dict[str, Any]:
 async def get_user_account_summary(
     user_id: int, db: AsyncSession
 ) -> List[Dict[str, Any]]:
-    """
-    Get summary of all user's accounts with balances.
 
-    Useful for dashboard display:
-    - Total balance across all accounts
-    - Individual account balances
-    - Recent transaction counts
-
-    Args:
-        user_id: User to summarize
-        db: Database session
-
-    Returns:
-        List of account summaries
-    """
     # Get all user's accounts with transaction counts
     stmt = (
         select(models.Account)
@@ -345,94 +331,3 @@ async def get_user_account_summary(
         summaries.append(summary)
 
     return summaries
-
-
-# ============================================================================
-# EXAMPLE USAGE
-# ============================================================================
-
-"""
-EXAMPLE 1: Load data after transformation
-===========================================
-
-@router.post("/transactions/load")
-async def load_transactions(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    stats = await load_processed_data(
-        user_id=current_user.id,
-        db=db
-    )
-    
-    return {
-        "message": "Data loaded successfully",
-        "stats": stats
-    }
-
-
-EXAMPLE 2: Get account dashboard data
-====================================
-
-@router.get("/accounts/summary")
-async def get_accounts_summary(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    accounts = await get_user_account_summary(
-        user_id=current_user.id,
-        db=db
-    )
-    
-    # Calculate totals
-    total_balance = sum(acc["balance"] for acc in accounts)
-    total_transactions = sum(acc["total_transactions"] for acc in accounts)
-    
-    return {
-        "total_balance": total_balance,
-        "total_transactions": total_transactions,
-        "accounts": accounts
-    }
-
-
-EXAMPLE 3: Validate user data
-============================
-
-@router.get("/data/validate")
-async def validate_data(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    report = await validate_user_data(
-        user_id=current_user.id,
-        db=db
-    )
-    
-    return report
-
-
-EXAMPLE 4: Manual balance recalculation
-=======================================
-
-@router.post("/accounts/{account_id}/recalculate-balance")
-async def recalculate_balance(
-    account_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    # Verify ownership
-    account = await db.get(Account, account_id)
-    if not account or account.owner_id != current_user.id:
-        raise HTTPException(404, "Account not found")
-    
-    success = await update_account_balance(account_id, db)
-    
-    if success:
-        return {"message": "Balance recalculated successfully"}
-    else:
-        raise HTTPException(500, "Failed to recalculate balance")
-"""
