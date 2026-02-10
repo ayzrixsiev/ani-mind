@@ -1,25 +1,3 @@
-# app/core/etl/pipeline.py
-"""
-PIPELINE MODULE - Orchestrate the complete ETL process
-
-Purpose:
-    1. Run the complete ETL pipeline in correct order
-    2. Handle errors and retries
-    3. Monitor pipeline performance
-    4. Provide pipeline status and logs
-
-Data Flow:
-    Raw Data → Ingest → Transform → Load → Aggregate → Dashboard
-       ↓           ↓          ↓        ↓         ↓
-    File/API → Clean → Optimize → Analyze → Insights
-
-Why pipeline module?
-    🔄 Automates the entire process
-    📊 Ensures data consistency
-    🚈 Handles large datasets efficiently
-    📈 Provides progress tracking
-"""
-
 import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime, date
@@ -33,9 +11,11 @@ from app.core import models
 from app.core.etl import ingest, transform, load, aggregate
 
 
-# ============================================================================
-# PIPELINE STATUS AND LOGGING
-# ============================================================================
+# -----------------------------------------------------------------------------
+# PIPELINE MODULE - Orchestration
+# Purpose: Run the complete ETL pipeline in correct order, handle errors, monitor pipeline performance, show etl status and logs
+# Why: Automate entire process
+# -----------------------------------------------------------------------------
 
 
 class PipelineStatus(Enum):
@@ -66,12 +46,24 @@ class PipelineLogger:
     """Custom logger for ETL pipeline operations."""
 
     def __init__(self, user_id: int):
+        """
+        Initialize a pipeline logger scoped to a specific user.
+
+        Args:
+            user_id: User whose pipeline run is being logged.
+
+        Example:
+            logger = PipelineLogger(user_id)
+        """
         self.user_id = user_id
         self.start_time = datetime.now()
         self.logs = []
 
     def log(self, step: str, message: str, level: str = "info"):
-        """Log a pipeline message."""
+        """
+        Log a pipeline message.
+        Why: centralized logs make debugging and auditing easier.
+        """
         timestamp = datetime.now().isoformat()
         log_entry = {
             "timestamp": timestamp,
@@ -91,11 +83,17 @@ class PipelineLogger:
             logger.info(f"[User {self.user_id}] {step}: {message}")
 
     def get_logs(self) -> List[Dict[str, Any]]:
-        """Get all logs for this pipeline run."""
+        """
+        Get all logs for this pipeline run.
+        Why: consumers may need step-by-step execution details.
+        """
         return self.logs
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get pipeline execution summary."""
+        """
+        Get pipeline execution summary.
+        Why: provides a compact overview for UI and monitoring.
+        """
         end_time = datetime.now()
         duration = (end_time - self.start_time).total_seconds()
 
@@ -109,11 +107,6 @@ class PipelineLogger:
         }
 
 
-# ============================================================================
-# PIPELINE ORCHESTRATION
-# ============================================================================
-
-
 async def run_ingest_pipeline(
     user_id: int,
     db: AsyncSession,
@@ -125,6 +118,7 @@ async def run_ingest_pipeline(
     Run the ingest step of the pipeline.
 
     This handles both CSV file uploads and API data fetching.
+    Why: centralizes ingest behavior and error handling.
 
     Args:
         user_id: User to ingest data for
@@ -150,22 +144,32 @@ async def run_ingest_pipeline(
             )
 
         elif api_config:
-            # API data ingestion
-            api_type = api_config.get("type", "payme")
+            # API data ingestion (generic by default; supports custom APIs)
+            api_type = api_config.get("type", "generic")
             pipeline_logger.log("ingest", f"Fetching data from {api_type} API...")
 
-            if api_type == "payme":
-                if account_id is None:
-                    raise ValueError("account_id is required for Payme API")
-                result = await ingest.ingest_from_payme(
-                    user_id=user_id,
-                    account_id=account_id,
-                    merchant_id=api_config["merchant_id"],
-                    api_token=api_config["api_token"],
-                    db=db,
-                )
-            else:
-                raise ValueError(f"Unsupported API type: {api_type}")
+            if account_id is None:
+                raise ValueError("account_id is required for API ingestion")
+
+            # For now, expect a URL/headers payload and route through ingest_from_api.
+            # Provider-specific helpers can be layered later if needed.
+            url = api_config.get("url")
+            headers = api_config.get("headers", {})
+            params = api_config.get("params")
+            source = api_config.get("source", api_type)
+
+            if not url:
+                raise ValueError("api_config.url is required for API ingestion")
+
+            result = await ingest.ingest_from_api(
+                url=url,
+                headers=headers,
+                user_id=user_id,
+                account_id=account_id,
+                params=params,
+                db=db,
+                source=source,
+            )
 
             pipeline_logger.log(
                 "ingest", f"API data processed: {result['saved']} saved"
@@ -194,6 +198,7 @@ async def run_transform_pipeline(user_id: int, db: AsyncSession) -> Dict[str, An
     Run the transform step of the pipeline.
 
     This cleans and normalizes all unprocessed transactions.
+    Why: ensures all raw transactions become analysis-ready.
 
     Args:
         user_id: User to transform data for
@@ -217,7 +222,7 @@ async def run_transform_pipeline(user_id: int, db: AsyncSession) -> Dict[str, An
         if result["failed"] > 0:
             pipeline_logger.log(
                 "transform",
-                f"⚠️ {result['failed']} transactions failed to transform",
+                f"{result['failed']} transactions failed to transform",
                 "warning",
             )
 
@@ -241,6 +246,7 @@ async def run_load_pipeline(user_id: int, db: AsyncSession) -> Dict[str, Any]:
     Run the load step of the pipeline.
 
     This optimizes storage and updates balances.
+    Why: keeps derived data (balances, stats) accurate and fast to query.
 
     Args:
         user_id: User to load data for
@@ -262,7 +268,7 @@ async def run_load_pipeline(user_id: int, db: AsyncSession) -> Dict[str, Any]:
         )
 
         if not result["data_valid"]:
-            pipeline_logger.log("load", "⚠️ Data validation issues found", "warning")
+            pipeline_logger.log("load", "Data validation issues found", "warning")
 
         return {
             "status": PipelineStatus.COMPLETED,
@@ -284,6 +290,7 @@ async def run_aggregate_pipeline(user_id: int, db: AsyncSession) -> Dict[str, An
     Run the aggregate step of the pipeline.
 
     This generates insights and analytics.
+    Why: users need summarized insights rather than raw transactions.
 
     Args:
         user_id: User to aggregate data for
@@ -319,11 +326,6 @@ async def run_aggregate_pipeline(user_id: int, db: AsyncSession) -> Dict[str, An
         }
 
 
-# ============================================================================
-# COMPLETE PIPELINE EXECUTION
-# ============================================================================
-
-
 async def run_complete_etl_pipeline(
     user_id: int,
     db: AsyncSession,
@@ -336,6 +338,7 @@ async def run_complete_etl_pipeline(
     Run the complete ETL pipeline.
 
     This is the main orchestrator that runs all steps in sequence.
+    Why: provides a single entry point for end-to-end processing.
 
     Args:
         user_id: User to run pipeline for
@@ -377,7 +380,7 @@ async def run_complete_etl_pipeline(
     try:
         # STEP 1: INGEST (if new data provided)
         if PipelineStep.INGEST in steps_to_run and (file_content or api_config):
-            pipeline_logger.log("pipeline", "🔄 Step 1: Ingestion")
+            pipeline_logger.log("pipeline", "Step 1: Ingestion")
             step_results["ingest"] = await run_ingest_pipeline(
                 user_id, db, account_id, file_content, api_config
             )
@@ -388,7 +391,7 @@ async def run_complete_etl_pipeline(
 
         # STEP 2: TRANSFORM
         if PipelineStep.TRANSFORM in steps_to_run:
-            pipeline_logger.log("pipeline", "🔄 Step 2: Transformation")
+            pipeline_logger.log("pipeline", "Step 2: Transformation")
             step_results["transform"] = await run_transform_pipeline(user_id, db)
 
             if step_results["transform"]["status"] == PipelineStatus.FAILED:
@@ -399,7 +402,7 @@ async def run_complete_etl_pipeline(
 
         # STEP 3: LOAD
         if PipelineStep.LOAD in steps_to_run:
-            pipeline_logger.log("pipeline", "🔄 Step 3: Loading")
+            pipeline_logger.log("pipeline", "Step 3: Loading")
             step_results["load"] = await run_load_pipeline(user_id, db)
 
             if step_results["load"]["status"] == PipelineStatus.FAILED:
@@ -408,7 +411,7 @@ async def run_complete_etl_pipeline(
 
         # STEP 4: AGGREGATE
         if PipelineStep.AGGREGATE in steps_to_run:
-            pipeline_logger.log("pipeline", "🔄 Step 4: Aggregation")
+            pipeline_logger.log("pipeline", "Step 4: Aggregation")
             step_results["aggregate"] = await run_aggregate_pipeline(user_id, db)
 
             if step_results["aggregate"]["status"] == PipelineStatus.FAILED:
@@ -419,11 +422,11 @@ async def run_complete_etl_pipeline(
 
         # Pipeline completed successfully
         pipeline_status = PipelineStatus.COMPLETED
-        pipeline_logger.log("pipeline", "✅ ETL pipeline completed successfully")
+        pipeline_logger.log("pipeline", "ETL pipeline completed successfully")
 
     except Exception as e:
         pipeline_status = PipelineStatus.FAILED
-        pipeline_logger.log("pipeline", f"❌ ETL pipeline failed: {str(e)}", "error")
+        pipeline_logger.log("pipeline", f"ETL pipeline failed: {str(e)}", "error")
 
     # Compile final results
     final_result = {
@@ -438,11 +441,6 @@ async def run_complete_etl_pipeline(
     return final_result
 
 
-# ============================================================================
-# PIPELINE MONITORING AND STATUS
-# ============================================================================
-
-
 async def get_pipeline_status(user_id: int, db: AsyncSession) -> Dict[str, Any]:
     """
     Get current pipeline status for a user.
@@ -451,6 +449,7 @@ async def get_pipeline_status(user_id: int, db: AsyncSession) -> Dict[str, Any]:
     - How many transactions are unprocessed
     - Last pipeline run status
     - Data quality metrics
+    Why: helps users and ops decide when to re-run ETL.
 
     Args:
         user_id: User to check status for
@@ -532,6 +531,7 @@ async def get_pipeline_health_check(db: AsyncSession) -> Dict[str, Any]:
 
     Returns:
         System health status and recommendations
+    Why: surfaces operational issues before they affect users.
     """
     health_status = {
         "overall_status": "healthy",
@@ -621,11 +621,6 @@ async def get_pipeline_health_check(db: AsyncSession) -> Dict[str, Any]:
     return health_status
 
 
-# ============================================================================
-# PIPELINE UTILITIES
-# ============================================================================
-
-
 async def schedule_pipeline_run(
     user_id: int, db: AsyncSession, schedule_type: str = "daily"
 ) -> Dict[str, Any]:
@@ -634,6 +629,7 @@ async def schedule_pipeline_run(
 
     This would integrate with a task scheduler like Celery
     for automated pipeline execution.
+    Why: keeps data fresh without manual triggers.
 
     Args:
         user_id: User to schedule pipeline for
@@ -686,6 +682,7 @@ async def rollback_pipeline(
 
     Returns:
         Rollback results
+    Why: provides a safety valve when transformations introduce errors.
     """
     logger.info(f"Starting rollback for user {user_id}, step: {step.value}")
 
@@ -731,132 +728,3 @@ async def rollback_pipeline(
             "status": "error",
             "message": f"Rollback not supported for step: {step.value}",
         }
-
-
-# ============================================================================
-# EXAMPLE USAGE
-# ============================================================================
-
-"""
-EXAMPLE 1: Complete ETL Pipeline with CSV Upload
-=================================================
-
-@router.post("/etl/run-csv")
-async def run_csv_etl_pipeline(
-    file: UploadFile,
-    account_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    # Read file content
-    file_content = await file.read()
-    
-    # Run complete pipeline
-    result = await run_complete_etl_pipeline(
-        user_id=current_user.id,
-        account_id=account_id,
-        file_content=file_content,
-        db=db
-    )
-    
-    if result["status"] == PipelineStatus.COMPLETED:
-        return {
-            "message": "ETL pipeline completed successfully",
-            "summary": result["pipeline_summary"],
-            "dashboard": result["step_results"]["aggregate"]["result"]
-        }
-    else:
-        raise HTTPException(500, f"Pipeline failed: {result['pipeline_summary']['logs']}")
-
-
-EXAMPLE 2: Transform Only (Processing Backlog)
-=============================================
-
-@router.post("/etl/transform-only")
-async def transform_backlog(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    # Run only transform step
-    result = await run_transform_pipeline(current_user.id, db)
-    
-    return result
-
-
-EXAMPLE 3: Get Pipeline Status
-==============================
-
-@router.get("/etl/status")
-async def get_status(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    
-    status = await get_pipeline_status(current_user.id, db)
-    return status
-
-
-EXAMPLE 4: System Health Check
-==============================
-
-@router.get("/etl/health")
-async def health_check(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    
-    # Require admin privileges
-    if current_user.role != "admin":
-        raise HTTPException(403, "Admin access required")
-    
-    health = await get_pipeline_health_check(db)
-    return health
-
-
-EXAMPLE 5: Scheduled Pipeline Integration
-========================================
-
-# This would be in your Celery tasks file
-# @celery_app.task
-# def scheduled_etl_pipeline():
-#     Run ETL pipeline for all users with new data.
-    
-    async def run_scheduled_pipeline():
-        async with get_async_session() as db:
-            # Get all users with unprocessed transactions
-            stmt = select(models.User.id).where(
-                exists().where(
-                    and_(
-                        models.Transaction.owner_id == models.User.id,
-                        models.Transaction.processed == False
-                    )
-                )
-            )
-            
-            result = await db.execute(stmt)
-            user_ids = result.scalars().all()
-            
-            for user_id in user_ids:
-                try:
-                    await run_complete_etl_pipeline(
-                        user_id=user_id,
-                        db=db,
-                        steps_to_run=[PipelineStep.TRANSFORM, PipelineStep.LOAD, PipelineStep.AGGREGATE]
-                    )
-                    logger.info(f"Scheduled pipeline completed for user {user_id}")
-                except Exception as e:
-                    logger.error(f"Scheduled pipeline failed for user {user_id}: {e}")
-    
-    asyncio.run(run_scheduled_pipeline())
-
-
-# Schedule to run every hour
-celery_app.conf.beat_schedule = {
-    'run-etl-pipeline': {
-        'task': 'app.tasks.scheduled_etl_pipeline',
-        'schedule': crontab(minute=0),  # Every hour
-    },
-}
-"""

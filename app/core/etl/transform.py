@@ -9,7 +9,27 @@ from sqlalchemy import select, update
 from app.core import models
 
 
+# -----------------------------------------------------------------------------
+# TRANSFORM MODULE
+# Purpose: clean, normalize, and categorize raw transactions.
+# Why: reliable analytics depend on consistent, validated transaction fields.
+# -----------------------------------------------------------------------------
+
+
 def parse_date(date: any) -> Optional[date]:
+    """
+    Parse a variety of date formats into a `date` object.
+    Why: input dates vary across sources and must be normalized for queries.
+
+    Args:
+        date: Raw date input (string, number, or datetime-like).
+
+    Returns:
+        Parsed date or None if parsing fails.
+
+    Example:
+        parsed = parse_date("15.01.2025")
+    """
 
     # Check if we got anything
     if not date:
@@ -57,6 +77,7 @@ def clean_transaction_date(transaction_date: Any) -> Optional[date]:
     """
     Main function to clean transaction dates.
     This is the public interface that other modules will call.
+    Why: provides a single safe date-cleaning entry point for the pipeline.
     """
     if not transaction_date:
         # Default to today if missing
@@ -66,6 +87,19 @@ def clean_transaction_date(transaction_date: Any) -> Optional[date]:
 
 
 def parse_amount(value: Any) -> Optional[Decimal]:
+    """
+    Parse a raw amount string into a Decimal, handling separators and currency text.
+    Why: amounts come in many formats and must be numeric for calculations.
+
+    Args:
+        value: Raw amount (string, int, float).
+
+    Returns:
+        Decimal amount or None if parsing fails.
+
+    Example:
+        amt = parse_amount("1,500,000 UZS")
+    """
 
     if not value:
         return None
@@ -104,6 +138,7 @@ def clean_transaction_amount(amount: Any) -> Optional[Decimal]:
     """
     Main function to clean transaction amounts.
     Returns positive Decimal for income, negative for expenses.
+    Why: downstream logic assumes numeric amounts with correct sign.
     """
     if amount is None:
         return None
@@ -113,6 +148,19 @@ def clean_transaction_amount(amount: Any) -> Optional[Decimal]:
 
 
 def normalize_merchant_name(merchant: Optional[str]) -> Optional[str]:
+    """
+    Normalize merchant names to reduce duplicates and improve analytics.
+    Why: consistent merchant names improve grouping and insights.
+
+    Args:
+        merchant: Raw merchant string.
+
+    Returns:
+        Normalized merchant name or None.
+
+    Example:
+        norm = normalize_merchant_name("MAKRO TASHKENT")
+    """
 
     if not merchant:
         return None
@@ -175,6 +223,21 @@ def normalize_merchant_name(merchant: Optional[str]) -> Optional[str]:
 def categorize_transaction(
     merchant: Optional[str], description: Optional[str], amount: Optional[Decimal]
 ) -> Optional[str]:
+    """
+    Assign a category based on merchant, description, and amount direction.
+    Why: categories power dashboards, budgets, and user insights.
+
+    Args:
+        merchant: Normalized merchant name.
+        description: Transaction description.
+        amount: Transaction amount (positive income, negative expense).
+
+    Returns:
+        Category name string.
+
+    Example:
+        cat = categorize_transaction("Makro", "card payment", Decimal("-50000"))
+    """
 
     # Combine search text
     search_text = f"{merchant or ''} {description or ''}".lower()
@@ -330,6 +393,20 @@ def categorize_transaction(
 async def transform_transaction(
     transaction: models.Transaction, db: AsyncSession
 ) -> bool:
+    """
+    Clean and normalize a single raw transaction and mark it as processed.
+    Why: this is the core step that converts raw data into analysis-ready data.
+
+    Args:
+        transaction: Raw transaction ORM object.
+        db: Async database session.
+
+    Returns:
+        True if successfully transformed, False otherwise.
+
+    Example:
+        ok = await transform_transaction(txn, db)
+    """
 
     try:
         # Get raw data (what we originally received)
@@ -419,6 +496,21 @@ async def transform_transaction(
 async def transform_all_unprocessed(
     user_id: int, db: AsyncSession, batch_size: int = 100
 ) -> Dict[str, int]:
+    """
+    Transform all unprocessed transactions for a user.
+    Why: batch processing keeps the pipeline efficient and consistent.
+
+    Args:
+        user_id: User whose transactions will be transformed.
+        db: Async database session.
+        batch_size: Reserved for future batching optimizations.
+
+    Returns:
+        Stats dict with totals and processed counts.
+
+    Example:
+        stats = await transform_all_unprocessed(user_id, db)
+    """
 
     # Get all unprocessed transactions for this user
     stmt = (
@@ -450,6 +542,20 @@ async def transform_all_unprocessed(
 
 # Reprocess a certain transaction, useful for debugging
 async def reprocess_transaction(transaction_id: int, db: AsyncSession) -> bool:
+    """
+    Reprocess a specific transaction for debugging or corrections.
+    Why: enables fixes when parsing rules or categories change.
+
+    Args:
+        transaction_id: Transaction ID to reprocess.
+        db: Async database session.
+
+    Returns:
+        True if reprocessing succeeds, False otherwise.
+
+    Example:
+        ok = await reprocess_transaction(123, db)
+    """
 
     # Get the transaction
     stmt = select(models.Transaction).where(models.Transaction.id == transaction_id)

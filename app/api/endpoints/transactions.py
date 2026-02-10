@@ -48,7 +48,8 @@ async def upload_transactions_csv(
     db: AsyncSession = db_dep(),
 ):
     """
-    Upload CSV of transactions; file processing happens in app.core.etl.ingest
+    Upload CSV of transactions; file processing happens in app.core.etl.ingest.
+    Note: this only ingests raw transactions. For the full ETL flow, use /etl/run-csv.
     """
     try:
         content = await file.read()

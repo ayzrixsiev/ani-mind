@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,9 +9,31 @@ from sqlalchemy.orm import selectinload
 from app.core import models
 
 
+# -----------------------------------------------------------------------------
+# LOAD MODULE
+# Purpose: apply optimized storage updates after transform.
+# Why: keep account balances, indexes, and cached stats in sync with processed data.
+# -----------------------------------------------------------------------------
+
+
 async def calculate_account_balance(
     account_id: int, db: AsyncSession, end_date: Optional[date] = None
 ) -> Optional[Decimal]:
+    """
+    Calculate account balance from processed transactions.
+    Why: account balances are derived data and must be recomputed for accuracy.
+
+    Args:
+        account_id: Account to calculate balance for.
+        db: Async database session.
+        end_date: Optional cutoff date for historical balance.
+
+    Returns:
+        Account balance as Decimal.
+
+    Example:
+        balance = await calculate_account_balance(account_id, db)
+    """
 
     # Build query for transactions
     query = select(func.coalesce(func.sum(models.Transaction.amount), 0)).where(
@@ -29,6 +51,20 @@ async def calculate_account_balance(
 
 
 async def update_account_balance(account_id: int, db: AsyncSession) -> bool:
+    """
+    Update a single account's stored balance from processed transactions.
+    Why: materialized balances make account views fast and consistent.
+
+    Args:
+        account_id: Account to update.
+        db: Async database session.
+
+    Returns:
+        True on success, False on failure.
+
+    Example:
+        ok = await update_account_balance(account_id, db)
+    """
 
     try:
         # Calculate current balance
@@ -57,6 +93,20 @@ async def update_account_balance(account_id: int, db: AsyncSession) -> bool:
 
 
 async def update_all_account_balances(user_id: int, db: AsyncSession) -> Dict[str, int]:
+    """
+    Update all accounts for a user and return summary stats.
+    Why: batch balance refresh keeps all accounts consistent after ETL.
+
+    Args:
+        user_id: Owner of accounts.
+        db: Async database session.
+
+    Returns:
+        Dict with updated and failed counts.
+
+    Example:
+        stats = await update_all_account_balances(user_id, db)
+    """
 
     # Get all user's accounts
     stmt = select(models.Account).where(models.Account.owner_id == user_id)
@@ -79,6 +129,19 @@ async def update_all_account_balances(user_id: int, db: AsyncSession) -> Dict[st
 
 
 async def create_performance_indexes(db: AsyncSession) -> bool:
+    """
+    Create common query indexes for the transactions table.
+    Why: indexes prevent slow queries as data volume grows.
+
+    Args:
+        db: Async database session.
+
+    Returns:
+        True on success, False on failure.
+
+    Example:
+        ok = await create_performance_indexes(db)
+    """
 
     try:
         # Common query patterns and their indexes:
@@ -113,6 +176,20 @@ async def create_performance_indexes(db: AsyncSession) -> bool:
 async def validate_transaction_data(
     transaction_id: int, db: AsyncSession
 ) -> Dict[str, Any]:
+    """
+    Validate a single transaction and return errors/warnings.
+    Why: catches data quality issues before they affect analytics.
+
+    Args:
+        transaction_id: Transaction to validate.
+        db: Async database session.
+
+    Returns:
+        Dict with validity status, errors, warnings.
+
+    Example:
+        report = await validate_transaction_data(txn_id, db)
+    """
 
     # Get the transaction with related data
     stmt = (
@@ -191,6 +268,20 @@ async def validate_transaction_data(
 
 
 async def validate_user_data(user_id: int, db: AsyncSession) -> Dict[str, Any]:
+    """
+    Validate all transactions for a user and check balance consistency.
+    Why: ensures the dataset is safe to use for insights and reporting.
+
+    Args:
+        user_id: User to validate.
+        db: Async database session.
+
+    Returns:
+        Validation report with errors, warnings, and balance issues.
+
+    Example:
+        report = await validate_user_data(user_id, db)
+    """
 
     # Get all user's transactions
     stmt = select(models.Transaction).where(models.Transaction.owner_id == user_id)
@@ -251,9 +342,23 @@ async def validate_user_data(user_id: int, db: AsyncSession) -> Dict[str, Any]:
 
 
 async def update_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
+    """
+    Compute and upsert cached user stats based on processed transactions.
+    Why: cached stats speed up dashboards and reduce repeated aggregation.
+
+    Args:
+        user_id: User to update stats for.
+        db: Async database session.
+
+    Returns:
+        Stats payload including totals and category breakdown.
+
+    Example:
+        stats = await update_user_stats(user_id, db)
+    """
 
     try:
-        # Total transactions (processed)
+        # Total transactions (processed only to reflect cleaned data)
         total_txn_stmt = select(func.count(models.Transaction.id)).where(
             models.Transaction.owner_id == user_id,
             models.Transaction.processed == True,
@@ -261,7 +366,7 @@ async def update_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
         total_txn_result = await db.execute(total_txn_stmt)
         total_transactions = int(total_txn_result.scalar() or 0)
 
-        # Total income and expense (processed)
+        # Total income and expense (processed only; keep expenses as positive numbers)
         income_stmt = select(
             func.coalesce(func.sum(models.Transaction.amount), 0)
         ).where(
@@ -281,9 +386,9 @@ async def update_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
         expense_result = await db.execute(expense_stmt)
 
         total_income = Decimal(str(income_result.scalar() or 0))
-        total_expense = Decimal(str(expense_result.scalar() or 0))
+        total_expense = abs(Decimal(str(expense_result.scalar() or 0)))
 
-        # Average transaction amount (absolute value)
+        # Average transaction amount (absolute value avoids sign issues)
         avg_stmt = select(
             func.coalesce(func.avg(func.abs(models.Transaction.amount)), 0)
         ).where(
@@ -293,7 +398,7 @@ async def update_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
         avg_result = await db.execute(avg_stmt)
         avg_transaction_amount = Decimal(str(avg_result.scalar() or 0))
 
-        # Spending by category (expenses only)
+        # Spending by category (expenses only), grouped for quick UI charts
         category_stmt = select(
             models.Transaction.category,
             func.coalesce(func.sum(models.Transaction.amount), 0).label("total_amount"),
@@ -320,7 +425,7 @@ async def update_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
         if existing:
             existing.total_transactions = total_transactions
             existing.total_income = total_income
-            existing.total_expense = abs(total_expense)
+            existing.total_expense = total_expense
             existing.avg_transaction_amount = avg_transaction_amount
             existing.spent_by_category = spent_by_category
         else:
@@ -329,7 +434,7 @@ async def update_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
                     user_id=user_id,
                     total_transactions=total_transactions,
                     total_income=total_income,
-                    total_expense=abs(total_expense),
+                    total_expense=total_expense,
                     avg_transaction_amount=avg_transaction_amount,
                     spent_by_category=spent_by_category,
                 )
@@ -340,7 +445,7 @@ async def update_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
         return {
             "total_transactions": total_transactions,
             "total_income": float(total_income),
-            "total_expense": float(abs(total_expense)),
+            "total_expense": float(total_expense),
             "avg_transaction_amount": float(avg_transaction_amount),
             "spent_by_category": spent_by_category,
         }
@@ -359,6 +464,20 @@ async def update_user_stats(user_id: int, db: AsyncSession) -> Dict[str, Any]:
 
 
 async def load_processed_data(user_id: int, db: AsyncSession) -> Dict[str, Any]:
+    """
+    Load step of ETL: update balances, ensure indexes, validate data, update stats.
+    Why: consolidates all post-transform actions into a single step.
+
+    Args:
+        user_id: User to load data for.
+        db: Async database session.
+
+    Returns:
+        Load stats including balance updates and validation issues.
+
+    Example:
+        result = await load_processed_data(user_id, db)
+    """
 
     stats = {
         "accounts_updated": 0,
@@ -395,6 +514,20 @@ async def load_processed_data(user_id: int, db: AsyncSession) -> Dict[str, Any]:
 async def get_user_account_summary(
     user_id: int, db: AsyncSession
 ) -> List[Dict[str, Any]]:
+    """
+    Build per-account summary stats for the user.
+    Why: account-level summaries drive account pages and quick overviews.
+
+    Args:
+        user_id: User to summarize.
+        db: Async database session.
+
+    Returns:
+        List of account summaries with balances and recent activity.
+
+    Example:
+        summaries = await get_user_account_summary(user_id, db)
+    """
 
     # Get all user's accounts with transaction counts
     stmt = (
@@ -409,11 +542,11 @@ async def get_user_account_summary(
     summaries = []
 
     for account in accounts:
-        # Count transactions in last 30 days
-        thirty_days_ago = datetime.now().replace(
-            hour=0, minute=0, second=0, microsecond=0
+        # Count transactions in last 30 days using a safe timedelta window
+        thirty_days_ago = (
+            datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            - timedelta(days=30)
         )
-        thirty_days_ago = thirty_days_ago.replace(day=thirty_days_ago.day - 30)
 
         recent_txns = [
             txn for txn in account.transactions if txn.created_at >= thirty_days_ago
