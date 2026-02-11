@@ -1,8 +1,6 @@
-# Fin-Pulse
+# Fin‑Pulse
 
-**Fin-Pulse** is a modern, containerized backend API designed to help users ingest, process, and gain insights from their personal financial data.  
-
-Through secure transaction logging, automated ETL pipelines, analytical modeling, and intelligent pattern detection, it turns raw financial logs into clear, actionable understanding of spending, trends, and opportunities.
+Fin‑Pulse is an AI‑ready finance backend that ingests raw transactions, standardizes them through a full ETL pipeline, and serves analytics and explanations through FastAPI. It is built to feel fast and trustworthy: clean data in, consistent insights out.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
@@ -13,48 +11,38 @@ Through secure transaction logging, automated ETL pipelines, analytical modeling
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI/CD-2088FF?style=flat&logo=github-actions&logoColor=white)](https://github.com/features/actions)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-## Current Capabilities
+## What It Does
+- Ingests CSV and API data with deduplication
+- Cleans and normalizes dates, amounts, merchants, and categories
+- Updates account balances and cached user stats
+- Generates dashboards: trends, spending by category, income stability, budgets
+- Serves analytics and AI‑style explanations via FastAPI
+- Includes health checks, status monitoring, and robust ETL logging
 
-- Secure user authentication & role-based access (JWT, regular users + admin)
-- Personal transaction logging (description, amount, date, category, type: income/expense)
-- Ownership rules — users can only view/edit/delete their own entries
-- Financial statistics endpoint (total spend/income, averages, category breakdowns, monthly trends)
-- Admin user management endpoint
-- Fully asynchronous PostgreSQL integration (SQLAlchemy 2.0)
-- Database schema migrations (Alembic)
-- Comprehensive automated testing suite
-  - Isolated test database
-  - Transaction rollbacks for test independence
-  - Async HTTP client testing (httpx)
-- Containerized development & deployment (Docker + Docker Compose)
-- Continuous integration pipeline (GitHub Actions)
+## ETL Pipeline
+Ingest → Transform → Load → Aggregate  
+Each stage is a dedicated module with validation, metrics, and clear failure handling.
 
-## Technology Roadmap
-
-- Transaction data ingestion from CSV/JSON or external APIs (Plaid sandbox, bank exports)
-- Automated ETL pipelines for categorization, cleaning, and aggregation (Prefect / Airflow)
-- Analytical schema & materialized views for fast queries (monthly aggregates, trends)
-- Anomaly detection & spending pattern insights (scikit-learn)
-- Model experiment tracking & versioning (MLflow)
-- Production model serving (BentoML / KServe)
-- Performance monitoring & data drift detection (Evidently AI)
-- Advanced orchestration & GitOps (Kubernetes, ArgoCD / Flux)
-
-## Quick Start
-
+## Run Locally (Docker)
 ```bash
-# Clone repository
-git clone https://github.com/ayzrixsiev/flowmind.git
-cd flowmind
+docker compose up --build
+```
 
-# Copy environment file
-cp .env.example .env
+Open API docs:  
+`http://localhost:8000/docs`
 
-# Start services (PostgreSQL + API)
-docker compose up -d --build
+## Run Tests
+```bash
+docker compose up --build -d
+docker compose exec -T api pytest -v
+```
 
-# Apply migrations
-docker compose exec api alembic upgrade head
+## Tech Stack
+- Python, FastAPI, SQLAlchemy 2.0
+- PostgreSQL, Alembic
+- Async DB access with `psycopg`
+- Docker, Docker Compose
+- Pytest + GitHub Actions
 
-# Open interactive API documentation
-# → http://localhost:8000/docs
+## License
+Apache 2.0
