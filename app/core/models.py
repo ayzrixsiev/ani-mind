@@ -63,10 +63,9 @@ class Account(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
-    name = Column(String, nullable=False)  # "Uzum Bank Salary", "Payme Wallet"
-    provider = Column(String, nullable=False)  # uzum/payme/csv/manual/api
+    name = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
 
-    # Account type helps categorization
     account_type = Column(String)
 
     currency = Column(String, default="UZS", nullable=False)
@@ -80,7 +79,6 @@ class Account(Base):
         index=True,
     )
 
-    # Track if account is active
     is_active = Column(Boolean, default=True)
 
     created_at = Column(
@@ -104,7 +102,6 @@ class Account(Base):
     )
 
 
-# Actual money (income, expense)
 class Transaction(Base):
 
     __tablename__ = "transactions"
@@ -125,27 +122,20 @@ class Transaction(Base):
         index=True,
     )
 
-    amount = Column(
-        Numeric(15, 2), nullable=False
-    )  # Positive = income, Negative = expense
+    amount = Column(Numeric(15, 2), nullable=False)
 
     currency = Column(String(3), default="UZS", nullable=False)
 
-    # Transaction details
     merchant = Column(String(255))
     category = Column(String(100), index=True)
     description = Column(Text)
 
-    # Keep original data for debugging and reprocessing
     raw_payload = Column(JSON, nullable=True)
 
-    # Deduplication: hash of (amount, merchant, date, source) to avoid duplicates
     transaction_hash = Column(String(64), unique=True, index=True)
 
-    # ETL pipeline tracking
     processed = Column(Boolean, default=False, index=True)
 
-    # External ID from source system (bank transaction ID, API ID, etc.)
     external_id = Column(String(255), index=True)
 
     # Timestamps
@@ -153,27 +143,24 @@ class Transaction(Base):
         TIMESTAMP(timezone=True),
         nullable=False,
         server_default=func.now(),
-        index=True,  # Index for date range queries
-    )  # When the transaction actually happened
+        index=True,
+    )
 
     ingested_at = Column(
         TIMESTAMP(timezone=True),
         nullable=False,
         server_default=func.now(),
-    )  # When we imported it
+    )
 
     updated_at = Column(
         TIMESTAMP(timezone=True),
         nullable=True,
         onupdate=func.now(),
-    )  # Last modification
+    )
 
-    # Relationship
     owner = relationship("User", back_populates="transactions")
     account = relationship("Account", back_populates="transactions")
 
-    # --- COMPOSITE INDEXES FOR PERFORMANCE ---
-    # Common query: "Get all unprocessed transactions for a user"
     __table_args__ = (
         Index("idx_owner_processed", "owner_id", "processed"),
         Index("idx_owner_date", "owner_id", "created_at"),
